@@ -27,9 +27,11 @@ from vision.visualization import (
 
 Point = Tuple[int, int]
 PINCH_CONFIDENCE_CLICK_THRESHOLD = 0.5
-# Scale factor for the interaction zone relative to the camera frame.
-# Values < 1.0 shrink the zone so fingers stay in view near frame edges.
-INTERACTION_SCALE = 0.608  # further 5% shrink from 0.64
+# Scale factors for tracking vs screen-mapping zones.
+# TRACKING_SCALE: outer green box where hands are tracked.
+# MAPPING_SCALE: inner red box that maps to full screen.
+TRACKING_SCALE = 0.8
+MAPPING_SCALE = 0.6
 
 
 def inside_box(x: int, y: int, top_left: Point, bottom_right: Point) -> bool:
@@ -163,18 +165,33 @@ def main() -> None:
 
             frame_height, frame_width = frame.shape[:2]
 
-            # Build a scaled interaction box to keep fingers in frame near edges
-            box_width = int(frame_width * INTERACTION_SCALE)
-            box_height = int(frame_height * INTERACTION_SCALE)
+            # ----- Define tracking (green) and mapping (red) regions -----
+            # Tracking region: larger box where hands are still detected.
+            track_box_width = int(frame_width * TRACKING_SCALE)
+            track_box_height = int(frame_height * TRACKING_SCALE)
             center_x = frame_width // 2
             center_y = frame_height // 2
-            top_left = (
-                max(0, center_x - box_width // 2),
-                max(0, center_y - box_height // 2),
+            tracking_top_left = (
+                max(0, center_x - track_box_width // 2),
+                max(0, center_y - track_box_height // 2),
             )
-            bottom_right = (
-                min(frame_width, center_x + box_width // 2),
-                min(frame_height, center_y + box_height // 2),
+            tracking_bottom_right = (
+                min(frame_width, center_x + track_box_width // 2),
+                min(frame_height, center_y + track_box_height // 2),
+            )
+
+            # Mapping region: smaller box inside tracking region, mapped to full screen.
+            map_box_width = int(track_box_width * MAPPING_SCALE)
+            map_box_height = int(track_box_height * MAPPING_SCALE)
+            map_center_x = (tracking_top_left[0] + tracking_bottom_right[0]) // 2
+            map_center_y = (tracking_top_left[1] + tracking_bottom_right[1]) // 2
+            mapping_top_left = (
+                max(tracking_top_left[0], map_center_x - map_box_width // 2),
+                max(tracking_top_left[1], map_center_y - map_box_height // 2),
+            )
+            mapping_bottom_right = (
+                min(tracking_bottom_right[0], map_center_x + map_box_width // 2),
+                min(tracking_bottom_right[1], map_center_y + map_box_height // 2),
             )
 
             pointer_index = 8
@@ -208,7 +225,7 @@ def main() -> None:
                     palm_y = int(palm_center[1] * frame_height)
                     palm_pos = (palm_x, palm_y)
                     palm_inside = inside_box_margin(
-                        palm_x, palm_y, top_left, bottom_right, margin=25
+                        palm_x, palm_y, tracking_top_left, tracking_bottom_right, margin=25
                     )
 
                 if len(hand.landmarks) > pointer_index:
@@ -217,7 +234,7 @@ def main() -> None:
                     iy = int(py * frame_height)
                     index_pointer = (ix, iy)
                     index_inside_flags.append(
-                        inside_box_margin(ix, iy, top_left, bottom_right, margin=25)
+                        inside_box_margin(ix, iy, tracking_top_left, tracking_bottom_right, margin=25)
                         or palm_inside
                     )
                     index_corrected = correct_fingertip(
@@ -236,15 +253,15 @@ def main() -> None:
                     middle_x = int(mx * frame_width)
                     middle_y = int(my * frame_height)
                     middle_inside_flags.append(
-                        inside_box_margin(middle_x, middle_y, top_left, bottom_right, margin=25)
+                        inside_box_margin(middle_x, middle_y, tracking_top_left, tracking_bottom_right, margin=25)
                         or palm_inside
                     )
                 else:
                     middle_inside_flags.append(palm_inside)
 
-            # Select cursor hand based on palm center position
+            # Select cursor hand based on palm center position (within tracking region)
             cursor_hand_idx = _select_cursor_hand(
-                palm_positions, top_left, bottom_right, margin=25
+                palm_positions, tracking_top_left, tracking_bottom_right, margin=25
             )
             if cursor_hand_idx is None and hands:
                 cursor_hand_idx = 0
@@ -291,7 +308,7 @@ def main() -> None:
             ):
                 cursor_position = palm_positions[cursor_hand_idx]
                 cursor_pointer_inside = inside_box_margin(
-                    cursor_position[0], cursor_position[1], top_left, bottom_right, margin=25
+                    cursor_position[0], cursor_position[1], tracking_top_left, tracking_bottom_right, margin=25
                 )
 
                 if cursor_pointer_inside and interaction_enabled:
@@ -303,8 +320,8 @@ def main() -> None:
                             palm_norm,
                             frame_width,
                             frame_height,
-                            top_left,
-                            bottom_right,
+                            mapping_top_left,
+                            mapping_bottom_right,
                             screen_width,
                             screen_height,
                         )
@@ -318,38 +335,25 @@ def main() -> None:
                 zone_text = "AIR INPUT DISABLED (show open palm to enable)"
 
             if interaction_enabled:
-                # ---------- LEFT CLICK ----------
+                # ---------- LEFT CLICK (single click per pinch) ----------
                 if is_left:
                     if active and not prev_left_active:
-                        mouse_controller.mouse_down(button="left")
-                    if not active and prev_left_active:
-                        mouse_controller.mouse_up(button="left")
+                        mouse_controller.left_click()
                     prev_left_active = active
                 else:
-                    if prev_left_active:
-                        mouse_controller.mouse_up(button="left")
-                        prev_left_active = False
+                    prev_left_active = False
 
-                # ---------- RIGHT CLICK ----------
+                # ---------- RIGHT CLICK (single click per pinch) ----------
                 if is_right:
                     if active and not prev_right_active:
-                        mouse_controller.mouse_down(button="right")
-                    if not active and prev_right_active:
-                        mouse_controller.mouse_up(button="right")
+                        mouse_controller.right_click()
                     prev_right_active = active
                 else:
-                    if prev_right_active:
-                        mouse_controller.mouse_up(button="right")
-                        prev_right_active = False
-            needs_release = (not interaction_enabled) or (
-                not active and not (is_left or is_right)
-            )
-            if needs_release and mouse_controller.is_dragging():
-                current_button = mouse_controller.current_button()
-                mouse_controller.mouse_up(button=current_button or "left")
-                mouse_controller._dragging = False
+                    prev_right_active = False
 
-            draw_interaction_box(frame, top_left, bottom_right)
+            # Draw tracking (green) and mapping (red) regions
+            draw_interaction_box(frame, tracking_top_left, tracking_bottom_right)
+            draw_interaction_box(frame, mapping_top_left, mapping_bottom_right, color=(0, 0, 255))
 
             for hand in hands:
                 draw_skeleton(frame, hand)

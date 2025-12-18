@@ -90,6 +90,13 @@ class MouseController:
         # Exponential moving average
         smoothed_x = self._last_output[0] + alpha * (x - self._last_output[0])
         smoothed_y = self._last_output[1] + alpha * (y - self._last_output[1])
+
+        # Micro-jitter deadzone: ignore very tiny movements around the last output
+        DEADZONE_PX = 3.0
+        dx_jitter = smoothed_x - self._last_output[0]
+        dy_jitter = smoothed_y - self._last_output[1]
+        if math.hypot(dx_jitter, dy_jitter) < DEADZONE_PX:
+            smoothed_x, smoothed_y = self._last_output
         
         # Velocity-based prediction: predict where cursor should be based on velocity
         # This bridges the gap between frame calculations
@@ -103,7 +110,7 @@ class MouseController:
             prediction_weight = min(0.3, speed / 100.0)
             smoothed_x = smoothed_x * (1 - prediction_weight) + predicted_x * prediction_weight
             smoothed_y = smoothed_y * (1 - prediction_weight) + predicted_y * prediction_weight
-        
+
         self._prev_point = (x, y)
         self._last_output = (smoothed_x, smoothed_y)
         return int(smoothed_x), int(smoothed_y)
