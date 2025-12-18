@@ -30,8 +30,9 @@ PINCH_CONFIDENCE_CLICK_THRESHOLD = 0.5
 # Scale factors for tracking vs screen-mapping zones.
 # TRACKING_SCALE: outer green box where hands are tracked.
 # MAPPING_SCALE: inner red box that maps to full screen.
-TRACKING_SCALE = 0.8
-MAPPING_SCALE = 0.6
+# Larger values = bigger boxes = lower cursor sensitivity (more hand travel per screen distance).
+TRACKING_SCALE = 0.9
+MAPPING_SCALE = 0.75
 
 
 def inside_box(x: int, y: int, top_left: Point, bottom_right: Point) -> bool:
